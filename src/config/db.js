@@ -4,12 +4,30 @@ import bcrypt from 'bcryptjs';
 
 dotenv.config();
 
+let host = process.env.DB_HOST || process.env.MYSQL_HOST || process.env.MYSQLHOST || '127.0.0.1';
+let port = parseInt(process.env.DB_PORT || process.env.MYSQL_PORT || process.env.MYSQLPORT || '3306', 10);
+let user = process.env.DB_USER || process.env.MYSQL_USER || process.env.MYSQLUSER || 'root';
+let password = process.env.DB_PASSWORD || process.env.DB_PASS || process.env.MYSQL_PASSWORD || process.env.MYSQLPASSWORD || '';
+let database = process.env.DB_NAME || process.env.MYSQL_DATABASE || process.env.MYSQLDATABASE || 'nexxskill_db';
+
+const dbUrl = process.env.DATABASE_URL || process.env.MYSQL_URL || process.env.JAWSDB_URL;
+if (dbUrl) {
+  try {
+    const parsed = new URL(dbUrl);
+    host = parsed.hostname || host;
+    port = parseInt(parsed.port || String(port), 10);
+    user = decodeURIComponent(parsed.username || user);
+    password = decodeURIComponent(parsed.password || password);
+    database = (parsed.pathname || '').replace(/^\//, '') || database;
+  } catch (_) {}
+}
+
 const dbConfig = {
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: parseInt(process.env.DB_PORT || '3306', 10),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASS || '',
-  database: process.env.DB_NAME || 'nexxskill_db',
+  host,
+  port,
+  user,
+  password,
+  database,
   waitForConnections: true,
   connectionLimit: 15,
   queueLimit: 0,
