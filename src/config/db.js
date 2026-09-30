@@ -202,6 +202,10 @@ export async function initDatabase() {
       await query(`ALTER TABLE courses ADD COLUMN enable_player TINYINT(1) NOT NULL DEFAULT 1 AFTER videos`);
     } catch (_) {}
 
+    try {
+      await query(`ALTER TABLE webinar_registrations ADD COLUMN reminder_sent TINYINT(1) NOT NULL DEFAULT 0 AFTER question`);
+    } catch (_) {}
+
     // Auto-seed default admin if no users exist
     const users = await query(`SELECT id FROM users LIMIT 1`);
     if (users.length === 0) {

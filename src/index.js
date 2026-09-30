@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import apiRouter from './routes/index.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { initDatabase } from './config/db.js';
+import { startWebinarReminderScheduler } from './services/webinarReminderService.js';
 
 dotenv.config();
 
@@ -62,6 +63,7 @@ app.use(errorHandler);
 // Start server if run directly
 async function startServer() {
   await initDatabase();
+  startWebinarReminderScheduler();
 
   const server = app.listen(PORT, () => {
     console.log(`===============================================`);

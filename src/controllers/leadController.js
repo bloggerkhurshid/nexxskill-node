@@ -246,3 +246,17 @@ export async function getPublicFaqs(req, res, next) {
     next(error);
   }
 }
+
+export async function triggerWebinarReminders(req, res, next) {
+  try {
+    const { checkAndSendWebinarReminders } = await import('../services/webinarReminderService.js');
+    const result = await checkAndSendWebinarReminders();
+    return res.status(200).json({
+      success: true,
+      message: 'Webinar reminders checked and processed',
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
+}

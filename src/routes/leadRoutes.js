@@ -10,5 +10,6 @@ router.get('/webinars', leadController.getPublicWebinars);
 router.post('/webinars/register', leadController.registerWebinar);
 router.delete('/webinars/:id/booking', requireAuth, leadController.cancelWebinarBooking);
 router.get('/faqs', leadController.getPublicFaqs);
+router.all('/webinars/trigger-reminders', leadController.triggerWebinarReminders);
 
 export default router;
