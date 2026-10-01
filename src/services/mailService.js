@@ -10,11 +10,73 @@ if (dns.setDefaultResultOrder) {
  * Low-level transporter sender with auto-port fallback (465 SSL -> 587 TLS)
  */
 async function sendWithNodemailer(mailOptions) {
+  const fromName = process.env.SMTP_FROM_NAME || 'NexxSkill Technical Academy';
+  const toEmail = mailOptions.to ? mailOptions.to.replace(/^.*<([^>]+)>.*$/, '$1').trim() : '';
+
+  // 1. Try Resend HTTPS API if key is present (Port 443, never blocked by cloud firewalls)
+  if (process.env.RESEND_API_KEY) {
+    try {
+      const resendFrom = process.env.RESEND_FROM || `${fromName} <onboarding@resend.dev>`;
+      const resendRes = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.RESEND_API_KEY.trim()}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: resendFrom,
+          to: [toEmail || mailOptions.to],
+          subject: mailOptions.subject,
+          html: mailOptions.html
+        })
+      });
+      const data = await resendRes.json();
+      if (resendRes.ok && data.id) {
+        console.log(`[MailService] Email sent via Resend HTTPS API to ${toEmail} [ID: ${data.id}]`);
+        return { success: true, messageId: data.id, method: 'Resend HTTPS API' };
+      }
+      console.warn(`[MailService Warning] Resend HTTPS API returned error:`, data);
+    } catch (err) {
+      console.warn(`[MailService Warning] Resend fetch error: ${err.message}`);
+    }
+  }
+
+  // 2. Try Brevo HTTPS API if key is present (Port 443)
+  if (process.env.BREVO_API_KEY) {
+    try {
+      const brevoSender = {
+        name: fromName,
+        email: process.env.BREVO_FROM_EMAIL || process.env.SMTP_USER || 'nexxskill39@gmail.com'
+      };
+      const brevoRes = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': process.env.BREVO_API_KEY.trim(),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sender: brevoSender,
+          to: [{ email: toEmail || mailOptions.to }],
+          subject: mailOptions.subject,
+          htmlContent: mailOptions.html
+        })
+      });
+      const data = await brevoRes.json();
+      if (brevoRes.ok && (data.messageId || data.messageIds)) {
+        console.log(`[MailService] Email sent via Brevo HTTPS API to ${toEmail} [ID: ${data.messageId}]`);
+        return { success: true, messageId: data.messageId, method: 'Brevo HTTPS API' };
+      }
+      console.warn(`[MailService Warning] Brevo HTTPS API returned error:`, data);
+    } catch (err) {
+      console.warn(`[MailService Warning] Brevo fetch error: ${err.message}`);
+    }
+  }
+
+  // 3. Fall back to SMTP via Nodemailer
   const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
   const smtpUser = process.env.SMTP_USER || 'nexxskill39@gmail.com';
   const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
   const fromEmail = process.env.SMTP_FROM_EMAIL || smtpUser;
-  const fromName = process.env.SMTP_FROM_NAME || 'NexxSkill Technical Academy';
 
   if (!smtpPass) {
     const errorMsg = 'SMTP_PASS is not configured in server environment';
