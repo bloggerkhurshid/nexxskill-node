@@ -4,6 +4,8 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
+router.post('/send-otp', authController.sendRegisterOtp);
+router.post('/send-register-otp', authController.sendRegisterOtp);
 router.post('/register', authController.register);
 router.post('/login', authController.login);
 router.get('/me', requireAuth, authController.me);

@@ -36,3 +36,29 @@ test('Cashfree Service: throws error when unconfigured so no free bypass is allo
     assert.ok(err.message.includes('Cashfree'), 'Should report Cashfree not configured');
   }
 });
+
+test('Mail Service: OTP email sender executes safely', async () => {
+  const { sendOtpEmail } = await import('../src/services/mailService.js');
+  const res = await sendOtpEmail('test@example.com', 'Test Learner', '123456');
+  assert.strictEqual(typeof res, 'boolean');
+});
+
+test('Mail Service: Purchase confirmation email sender executes safely', async () => {
+  const { sendPurchaseSuccessEmail } = await import('../src/services/mailService.js');
+  const res = await sendPurchaseSuccessEmail({
+    email: 'test@example.com',
+    name: 'Test Student',
+    courseTitle: 'Mainframe Full Course',
+    courseDuration: '2 Months',
+    amountRupees: '7999.00',
+    orderId: 'order_test_123',
+    paymentId: 'cf_pay_test_456'
+  });
+  assert.strictEqual(typeof res, 'boolean');
+});
+
+test('Mail Service: Welcome email sender executes safely', async () => {
+  const { sendWelcomeEmail } = await import('../src/services/mailService.js');
+  const res = await sendWelcomeEmail('test@example.com', 'Test Student');
+  assert.strictEqual(typeof res, 'boolean');
+});

@@ -1,7 +1,55 @@
 import crypto from 'crypto';
 import { query } from '../config/db.js';
 import * as CashfreeService from '../services/cashfreeService.js';
-import { sendMail } from '../services/mailService.js';
+import { sendMail, sendPurchaseSuccessEmail } from '../services/mailService.js';
+
+/**
+ * Helper to dispatch beautiful branded receipt and confirmation email
+ * and ensure each paid enrollment receives exactly one confirmation email.
+ */
+async function sendPurchaseConfirmation(enrollmentId) {
+  try {
+    const rows = await query(
+      `SELECT e.*, c.title AS course_title, c.duration AS course_duration, u.name AS user_name, u.email AS user_email
+       FROM enrollments e
+       JOIN courses c ON e.course_id = c.id
+       JOIN users u ON e.user_id = u.id
+       WHERE e.id = ? AND e.status = 'paid'`,
+      [enrollmentId]
+    );
+
+    if (rows.length === 0) return;
+    const item = rows[0];
+
+    // Prevent duplicate emails
+    if (item.email_sent) return;
+
+    const amountRupees = (item.amount_paise / 100).toFixed(2);
+    const dateFormatted = new Date(item.created_at || Date.now()).toLocaleDateString('en-IN', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+
+    console.log(`[PaymentController] Sending enrollment receipt to ${item.user_email} for ${item.course_title}`);
+    await sendPurchaseSuccessEmail({
+      email: item.user_email,
+      name: item.user_name,
+      courseTitle: item.course_title,
+      courseDuration: item.course_duration || 'Cohort / Guided Labs',
+      amountRupees,
+      orderId: item.razorpay_order_id || `order_${item.id}`,
+      paymentId: item.razorpay_payment_id || 'Cashfree Verified',
+      date: dateFormatted
+    });
+
+    try {
+      await query(`UPDATE enrollments SET email_sent = 1 WHERE id = ?`, [enrollmentId]);
+    } catch (_) {}
+  } catch (err) {
+    console.error('[PaymentController Error] Failed to send purchase confirmation email:', err.message);
+  }
+}
 
 export async function createOrder(req, res, next) {
   try {
@@ -71,7 +119,7 @@ export async function createOrder(req, res, next) {
       const freeOrderId = 'free_' + crypto.randomBytes(6).toString('hex');
       const freePaymentId = 'FREE_COUPON_' + (couponCode || 'PROMO');
 
-      await query(
+      const insResult = await query(
         `INSERT INTO enrollments (user_id, course_id, razorpay_order_id, razorpay_payment_id, amount_paise, coupon_code, discount_amount_paise, status) 
          VALUES (?, ?, ?, ?, 0, ?, ?, 'paid')`,
         [req.user.id, courseId, freeOrderId, freePaymentId, couponCode, discountAmountPaise]
@@ -83,8 +131,9 @@ export async function createOrder(req, res, next) {
         } catch (_) {}
       }
 
-      const emailHtml = `<h2>Enrollment Confirmed!</h2><p>Hi ${req.user.name},</p><p>You have successfully enrolled in <strong>${course.title}</strong> for FREE using code <strong>${couponCode}</strong>.</p><p>Enjoy learning!</p>`;
-      sendMail(req.user.email, req.user.name, `NexxSkill Enrollment Confirmed - ${course.title}`, emailHtml);
+      if (insResult?.insertId) {
+        sendPurchaseConfirmation(insResult.insertId).catch(() => {});
+      }
 
       return res.status(200).json({
         success: true,
@@ -208,9 +257,8 @@ export async function verifyPayment(req, res, next) {
         } catch (_) {}
       }
 
-      const amountRupees = (enrollment.amount_paise / 100).toFixed(2);
-      const emailHtml = `<h2>Enrollment Confirmed!</h2><p>Hi ${req.user.name},</p><p>Thank you for enrolling in <strong>${enrollment.course_title}</strong>.</p><p>Payment Reference: ${paymentId || orderId}<br>Amount Paid: ₹${amountRupees}</p><p>Best regards,<br>NexxSkill Team</p>`;
-      sendMail(req.user.email, req.user.name, `NexxSkill Enrollment Receipt - ${enrollment.course_title}`, emailHtml);
+      // Dispatch comprehensive branded enrollment confirmation & receipt email
+      sendPurchaseConfirmation(enrollment.id).catch(() => {});
     }
 
     return res.status(200).json({
@@ -254,6 +302,14 @@ export async function handleWebhook(req, res, next) {
         `UPDATE enrollments SET razorpay_payment_id = ?, status = 'paid' WHERE razorpay_order_id = ?`,
         [paymentId || `cf_wh_${Date.now()}`, orderId]
       );
+
+      const whEnrollments = await query(
+        `SELECT id FROM enrollments WHERE razorpay_order_id = ? AND status = 'paid'`,
+        [orderId]
+      );
+      if (whEnrollments.length > 0) {
+        sendPurchaseConfirmation(whEnrollments[0].id).catch(() => {});
+      }
     }
 
     return res.status(200).json({
