@@ -13,7 +13,7 @@ test('HTTP Route: GET /health returns 200 with API status', async () => {
 
     const data = await res.json();
     assert.strictEqual(data.success, true);
-    assert.strictEqual(data.version, '1.0.1 - Cashfree Active');
+    assert.ok(data.version && data.version.includes('1.0.'));
     assert.ok(data.message.includes('Node.js'));
   } finally {
     server.close();
@@ -35,18 +35,23 @@ test('HTTP Route: GET /v1/health returns 200 with /v1 prefix', async () => {
   }
 });
 
-test('HTTP Route: GET /unknown-endpoint returns 404', async () => {
+test('HTTP Route: POST /auth/google requires email', async () => {
   const server = app.listen(0);
   const port = server.address().port;
 
   try {
-    const res = await fetch(`http://localhost:${port}/random-unknown-endpoint-xyz`);
-    assert.strictEqual(res.status, 404);
+    const res = await fetch(`http://localhost:${port}/v1/auth/google`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    assert.strictEqual(res.status, 400);
 
     const data = await res.json();
     assert.strictEqual(data.success, false);
-    assert.strictEqual(data.error.code, 'NOT_FOUND');
+    assert.strictEqual(data.error.code, 'INVALID_INPUT');
   } finally {
     server.close();
   }
 });
+

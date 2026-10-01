@@ -14,7 +14,7 @@ router.get(['/', '/health'], (req, res) => {
   res.status(200).json({
     success: true,
     message: 'NexxSkill REST API (Node.js) is running',
-    version: '1.0.2 - Cashfree & OTP Active'
+    version: '1.0.3 - Cashfree, OTP & Google Auth Active'
   });
 });
 
