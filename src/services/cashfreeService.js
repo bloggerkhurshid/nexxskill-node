@@ -41,8 +41,13 @@ export async function createOrder({ orderId, amountRupees, customer, returnUrl, 
   }
 
   const cleanPhone = (customer.phone || '')
+    .toString()
     .replace(/[^0-9]/g, '')
-    .slice(-10) || '9876543210';
+    .slice(-10);
+
+  if (!cleanPhone || cleanPhone.length < 10) {
+    throw new Error('A valid 10-digit customer mobile number is required to create a Cashfree order');
+  }
 
   const payload = {
     order_id: finalOrderId,

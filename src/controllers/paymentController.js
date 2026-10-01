@@ -147,6 +147,26 @@ export async function createOrder(req, res, next) {
       });
     }
 
+    const providedPhone = (input.phone || '').toString().trim().replace(/[^0-9]/g, '').slice(-10);
+    let finalPhone = (req.user.phone || '').toString().trim().replace(/[^0-9]/g, '').slice(-10);
+
+    if (providedPhone && providedPhone.length === 10) {
+      finalPhone = providedPhone;
+      try {
+        await query('UPDATE users SET phone = ? WHERE id = ?', [finalPhone, req.user.id]);
+      } catch (_) {}
+    }
+
+    if (!finalPhone || finalPhone.length < 10) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'PHONE_REQUIRED',
+          message: 'A valid 10-digit mobile number is required before proceeding to Cashfree checkout.'
+        }
+      });
+    }
+
     const orderId = 'order_' + Date.now() + '_' + crypto.randomBytes(3).toString('hex');
     const orderData = await CashfreeService.createOrder({
       orderId,
@@ -155,7 +175,7 @@ export async function createOrder(req, res, next) {
         id: req.user.id,
         name: req.user.name,
         email: req.user.email,
-        phone: req.user.phone
+        phone: finalPhone
       },
       returnUrl: 'https://nexxskill.com/student/dashboard',
       orderNote: `Course: ${course.title}`
