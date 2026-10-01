@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { query } from '../config/db.js';
-import * as RazorpayService from '../services/razorpayService.js';
+import * as CashfreeService from '../services/cashfreeService.js';
 import { sendMail } from '../services/mailService.js';
 
 export async function createOrder(req, res, next) {
@@ -62,16 +62,14 @@ export async function createOrder(req, res, next) {
       } else {
         couponCode = null;
       }
-    } else {
-      couponCode = null;
     }
 
     const finalAmountPaise = Math.max(0, originalAmountPaise - discountAmountPaise);
 
-    // Handle 100% discount / Free checkout
+    // 100% discount / Free Enrollment
     if (finalAmountPaise === 0) {
-      const freeOrderId = 'free_ord_' + crypto.randomBytes(6).toString('hex');
-      const freePaymentId = 'free_pay_' + crypto.randomBytes(6).toString('hex');
+      const freeOrderId = 'free_' + crypto.randomBytes(6).toString('hex');
+      const freePaymentId = 'FREE_COUPON_' + (couponCode || 'PROMO');
 
       await query(
         `INSERT INTO enrollments (user_id, course_id, razorpay_order_id, razorpay_payment_id, amount_paise, coupon_code, discount_amount_paise, status) 
@@ -85,8 +83,8 @@ export async function createOrder(req, res, next) {
         } catch (_) {}
       }
 
-      const emailHtml = `<h2>Enrollment Confirmed (Free Coupon Applied)!</h2><p>Hi ${req.user.name},</p><p>You have successfully unlocked <strong>${course.title}</strong> with coupon <strong>${couponCode}</strong>.</p><p>Best regards,<br>NexxSkill Team</p>`;
-      sendMail(req.user.email, req.user.name, `NexxSkill Enrollment Receipt - ${course.title}`, emailHtml);
+      const emailHtml = `<h2>Enrollment Confirmed!</h2><p>Hi ${req.user.name},</p><p>You have successfully enrolled in <strong>${course.title}</strong> for FREE using code <strong>${couponCode}</strong>.</p><p>Enjoy learning!</p>`;
+      sendMail(req.user.email, req.user.name, `NexxSkill Enrollment Confirmed - ${course.title}`, emailHtml);
 
       return res.status(200).json({
         success: true,
@@ -100,10 +98,18 @@ export async function createOrder(req, res, next) {
       });
     }
 
-    const receipt = 'enr_' + crypto.randomBytes(6).toString('hex');
-    const orderData = await RazorpayService.createOrder(finalAmountPaise, receipt, {
-      course_id: String(courseId),
-      user_id: String(req.user.id)
+    const orderId = 'order_' + Date.now() + '_' + crypto.randomBytes(3).toString('hex');
+    const orderData = await CashfreeService.createOrder({
+      orderId,
+      amountRupees: finalAmountPaise / 100,
+      customer: {
+        id: req.user.id,
+        name: req.user.name,
+        email: req.user.email,
+        phone: req.user.phone
+      },
+      returnUrl: 'https://nexxskill.com/student/dashboard',
+      orderNote: `Course: ${course.title}`
     });
 
     await query(
@@ -117,9 +123,13 @@ export async function createOrder(req, res, next) {
       isFree: false,
       data: {
         orderId: orderData.orderId,
+        cfOrderId: orderData.cfOrderId,
+        paymentSessionId: orderData.paymentSessionId,
         amount: finalAmountPaise,
-        currency: orderData.currency,
-        keyId: orderData.keyId,
+        currency: orderData.orderCurrency || 'INR',
+        environment: orderData.environment,
+        appId: orderData.appId,
+        isDemo: orderData.isDemo,
         courseTitle: course.title
       }
     });
@@ -131,37 +141,57 @@ export async function createOrder(req, res, next) {
 export async function verifyPayment(req, res, next) {
   try {
     const input = req.body || {};
-    const orderId = (input.razorpay_order_id || '').trim();
-    const paymentId = (input.razorpay_payment_id || '').trim();
-    const signature = (input.razorpay_signature || '').trim();
+    const orderId = (input.order_id || input.orderId || input.razorpay_order_id || '').trim();
+    let paymentId = (input.cf_payment_id || input.payment_id || input.razorpay_payment_id || '').trim();
 
-    if (!paymentId) {
+    if (!orderId && !paymentId) {
       return res.status(400).json({
         success: false,
-        error: { code: 'INVALID_INPUT', message: 'Missing Razorpay payment ID' }
+        error: { code: 'INVALID_INPUT', message: 'Missing order reference' }
       });
     }
 
-    if (orderId && signature) {
-      const verified = RazorpayService.verifySignature(orderId, paymentId, signature);
-      if (!verified) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'SIGNATURE_VERIFICATION_FAILED', message: 'Payment signature verification failed' }
-        });
-      }
+    let isVerified = false;
 
+    if (orderId) {
+      try {
+        const orderInfo = await CashfreeService.getOrder(orderId);
+        if (orderInfo && (orderInfo.order_status === 'PAID' || orderInfo.is_demo)) {
+          isVerified = true;
+          if (!paymentId) {
+            const payments = await CashfreeService.getOrderPayments(orderId);
+            paymentId = payments?.[0]?.cf_payment_id || `cf_pay_${Date.now()}`;
+          }
+        }
+      } catch (err) {
+        // Fallback for demo order test
+        if (orderId.includes('demo')) {
+          isVerified = true;
+          paymentId = paymentId || `cf_pay_demo_${Date.now()}`;
+        }
+      }
+    } else if (paymentId) {
+      isVerified = true;
+    }
+
+    if (!isVerified) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'PAYMENT_NOT_COMPLETED', message: 'Payment has not been completed or verified yet.' }
+      });
+    }
+
+    if (orderId) {
       await query(
-        `UPDATE enrollments SET razorpay_payment_id = ?, razorpay_signature = ?, status = 'paid' 
+        `UPDATE enrollments SET razorpay_payment_id = ?, status = 'paid' 
          WHERE razorpay_order_id = ? AND user_id = ?`,
-        [paymentId, signature, orderId, req.user.id]
+        [paymentId || `cf_pay_${Date.now()}`, orderId, req.user.id]
       );
     } else {
-      // Test mode fallback activation for latest created order
       await query(
         `UPDATE enrollments SET razorpay_payment_id = ?, status = 'paid' 
          WHERE user_id = ? AND status = 'created' ORDER BY id DESC LIMIT 1`,
-        [paymentId, req.user.id]
+        [paymentId || `cf_pay_${Date.now()}`, req.user.id]
       );
     }
 
@@ -191,7 +221,7 @@ export async function verifyPayment(req, res, next) {
       }
 
       const amountRupees = (enrollment.amount_paise / 100).toFixed(2);
-      const emailHtml = `<h2>Enrollment Confirmed!</h2><p>Hi ${req.user.name},</p><p>Thank you for enrolling in <strong>${enrollment.course_title}</strong>.</p><p>Payment ID: ${paymentId}<br>Amount Paid: ₹${amountRupees}</p><p>Best regards,<br>NexxSkill Team</p>`;
+      const emailHtml = `<h2>Enrollment Confirmed!</h2><p>Hi ${req.user.name},</p><p>Thank you for enrolling in <strong>${enrollment.course_title}</strong>.</p><p>Payment Reference: ${paymentId || orderId}<br>Amount Paid: ₹${amountRupees}</p><p>Best regards,<br>NexxSkill Team</p>`;
       sendMail(req.user.email, req.user.name, `NexxSkill Enrollment Receipt - ${enrollment.course_title}`, emailHtml);
     }
 
@@ -206,10 +236,11 @@ export async function verifyPayment(req, res, next) {
 
 export async function handleWebhook(req, res, next) {
   try {
-    const signature = req.headers['x-razorpay-signature'] || '';
+    const signature = req.headers['x-webhook-signature'] || '';
+    const timestamp = req.headers['x-webhook-timestamp'] || '';
     const rawBody = req.rawBody || JSON.stringify(req.body);
 
-    if (!RazorpayService.verifyWebhookSignature(rawBody, signature)) {
+    if (!CashfreeService.verifyWebhookSignature(rawBody, signature, timestamp)) {
       return res.status(400).json({
         success: false,
         error: { code: 'INVALID_WEBHOOK_SIGNATURE', message: 'Invalid webhook signature' }
@@ -217,19 +248,24 @@ export async function handleWebhook(req, res, next) {
     }
 
     const payload = req.body || {};
-    const event = payload.event;
+    const eventType = payload.type || payload.event;
+    const orderData = payload.data?.order || {};
+    const paymentData = payload.data?.payment || {};
 
-    if (event === 'payment.captured' || event === 'order.paid') {
-      const paymentEntity = payload.payload?.payment?.entity || {};
-      const orderId = paymentEntity.order_id;
-      const paymentId = paymentEntity.id;
+    const orderId = orderData.order_id || payload.order_id;
+    const paymentId = paymentData.cf_payment_id || payload.payment_id;
+    const paymentStatus = paymentData.payment_status || orderData.order_status;
 
-      if (orderId) {
-        await query(
-          `UPDATE enrollments SET razorpay_payment_id = ?, status = 'paid' WHERE razorpay_order_id = ?`,
-          [paymentId, orderId]
-        );
-      }
+    if (
+      orderId &&
+      (eventType === 'PAYMENT_SUCCESS_WEBHOOK' ||
+        paymentStatus === 'SUCCESS' ||
+        paymentStatus === 'PAID')
+    ) {
+      await query(
+        `UPDATE enrollments SET razorpay_payment_id = ?, status = 'paid' WHERE razorpay_order_id = ?`,
+        [paymentId || `cf_wh_${Date.now()}`, orderId]
+      );
     }
 
     return res.status(200).json({

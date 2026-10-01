@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { generateTokens, decodeToken } from '../src/services/jwtService.js';
-import * as RazorpayService from '../src/services/razorpayService.js';
+import * as CashfreeService from '../src/services/cashfreeService.js';
 
 test('JWT Service: should generate and decode valid tokens', () => {
   const mockUser = {
@@ -24,14 +24,22 @@ test('JWT Service: should generate and decode valid tokens', () => {
   assert.strictEqual(decoded.type, 'access');
 });
 
-test('Razorpay Service: should generate mock order in demo mode', async () => {
-  const order = await RazorpayService.createOrder(10000, 'test_receipt_123');
+test('Cashfree Service: should generate demo order when unconfigured', async () => {
+  const order = await CashfreeService.createOrder({
+    orderId: 'order_test_123',
+    amountRupees: 4999,
+    customer: { id: 1, name: 'Student', email: 'student@example.com' }
+  });
   assert.ok(order.orderId, 'Order ID should exist');
-  assert.strictEqual(order.amount, 10000);
-  assert.strictEqual(order.currency, 'INR');
+  assert.ok(order.paymentSessionId, 'Payment session ID should exist');
+  assert.strictEqual(order.orderAmount, 4999);
+  assert.strictEqual(order.orderCurrency, 'INR');
 });
 
-test('Razorpay Service: should verify mock signature safely', () => {
-  const verified = RazorpayService.verifySignature('order_demo_123', 'pay_demo_456', 'any_sig');
+test('Cashfree Service: should verify mock order and webhook safely', async () => {
+  const order = await CashfreeService.getOrder('order_demo_123');
+  assert.strictEqual(order.order_status, 'PAID');
+
+  const verified = CashfreeService.verifyWebhookSignature('{}', 'any_sig', '1700000000');
   assert.strictEqual(verified, true);
 });
