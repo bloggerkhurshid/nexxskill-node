@@ -13,7 +13,7 @@ test('HTTP Route: GET /health returns 200 with API status', async () => {
 
     const data = await res.json();
     assert.strictEqual(data.success, true);
-    assert.strictEqual(data.version, '1.0.0');
+    assert.strictEqual(data.version, '1.0.1 - Cashfree Active');
     assert.ok(data.message.includes('Node.js'));
   } finally {
     server.close();

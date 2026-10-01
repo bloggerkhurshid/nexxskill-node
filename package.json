@@ -1,6 +1,6 @@
 {
   "name": "nexxskill-api-node",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "NexxSkill REST API Backend built with Node.js & Express",
   "main": "index.js",
   "type": "module",
