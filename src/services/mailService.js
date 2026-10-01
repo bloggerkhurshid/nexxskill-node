@@ -13,7 +13,46 @@ async function sendWithNodemailer(mailOptions) {
   const fromName = process.env.SMTP_FROM_NAME || 'NexxSkill Technical Academy';
   const toEmail = mailOptions.to ? mailOptions.to.replace(/^.*<([^>]+)>.*$/, '$1').trim() : '';
 
-  // 1. Try Resend HTTPS API if key is present (Port 443, never blocked by cloud firewalls)
+  // 1. Try GoDaddy PHPMailer Relay Bridge (HTTPS Port 443 - bypasses all container firewall blocks)
+  const relayUrl = process.env.MAIL_RELAY_URL || 'https://nexxskill.com/mail-relay.php';
+  const relaySecret = process.env.MAIL_RELAY_SECRET || 'nexxskill_relay_secret_key_2026';
+  const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
+  const smtpUser = process.env.SMTP_USER || 'nexxskill39@gmail.com';
+  const fromEmail = process.env.SMTP_FROM_EMAIL || smtpUser;
+
+  if (relayUrl) {
+    try {
+      const relayRes = await fetch(relayUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${relaySecret}`
+        },
+        body: JSON.stringify({
+          to: toEmail || mailOptions.to,
+          name: mailOptions.name || 'Learner',
+          subject: mailOptions.subject,
+          html: mailOptions.html,
+          fromEmail,
+          fromName,
+          smtpUser,
+          smtpPass
+        }),
+        signal: AbortSignal.timeout(10000)
+      });
+
+      const relayData = await relayRes.json();
+      if (relayRes.ok && relayData.success) {
+        console.log(`[MailService] Email sent via GoDaddy Relay (${relayData.method}) to ${toEmail}`);
+        return { success: true, messageId: relayData.message || 'godaddy_relay_ok', method: relayData.method };
+      }
+      console.warn(`[MailService Warning] GoDaddy Mail Relay returned:`, relayData);
+    } catch (err) {
+      console.warn(`[MailService Warning] GoDaddy Mail Relay not reachable yet (${err.message}). Trying alternatives...`);
+    }
+  }
+
+  // 2. Try Resend HTTPS API if key is present (Port 443)
   if (process.env.RESEND_API_KEY) {
     try {
       const resendFrom = process.env.RESEND_FROM || `${fromName} <onboarding@resend.dev>`;
@@ -74,9 +113,6 @@ async function sendWithNodemailer(mailOptions) {
 
   // 3. Fall back to SMTP via Nodemailer
   const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const smtpUser = process.env.SMTP_USER || 'nexxskill39@gmail.com';
-  const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
-  const fromEmail = process.env.SMTP_FROM_EMAIL || smtpUser;
 
   if (!smtpPass) {
     const errorMsg = 'SMTP_PASS is not configured in server environment';
