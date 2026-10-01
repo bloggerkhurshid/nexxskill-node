@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { query } from '../config/db.js';
 import { generateTokens } from '../services/jwtService.js';
 import { sendOtpEmail, sendWelcomeEmail } from '../services/mailService.js';
+import { verifyFirebaseIdToken } from '../config/firebaseAdmin.js';
 
 export async function sendRegisterOtp(req, res, next) {
   try {
@@ -275,21 +276,35 @@ export async function googleAuth(req, res, next) {
       });
     }
 
-    // Verify token with Google's tokeninfo API if idToken is present
+    // Verify token with Firebase Admin SDK or Google OAuth tokeninfo API
     if (idToken) {
+      let verifiedEmail = null;
       try {
-        const resp = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
-        if (resp.ok) {
-          const payload = await resp.json();
-          if (payload.email && payload.email.toLowerCase() !== trimmedEmail) {
-            return res.status(401).json({
-              success: false,
-              error: { code: 'TOKEN_EMAIL_MISMATCH', message: 'Google token does not match provided email' }
-            });
-          }
+        const decoded = await verifyFirebaseIdToken(idToken);
+        if (decoded && decoded.email) {
+          verifiedEmail = decoded.email.toLowerCase();
         }
-      } catch (err) {
-        console.warn('[Google Auth Token Check Warning]', err.message);
+      } catch (_) {}
+
+      if (!verifiedEmail) {
+        try {
+          const resp = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+          if (resp.ok) {
+            const payload = await resp.json();
+            if (payload.email) {
+              verifiedEmail = payload.email.toLowerCase();
+            }
+          }
+        } catch (err) {
+          console.warn('[Google Auth Token Check Warning]', err.message);
+        }
+      }
+
+      if (verifiedEmail && verifiedEmail !== trimmedEmail) {
+        return res.status(401).json({
+          success: false,
+          error: { code: 'TOKEN_EMAIL_MISMATCH', message: 'Google token does not match provided email' }
+        });
       }
     }
 
