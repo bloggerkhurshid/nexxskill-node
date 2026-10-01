@@ -1,40 +1,51 @@
 import nodemailer from 'nodemailer';
 
 export async function sendMail(toEmail, toName, subject, htmlBody) {
-  const smtpHost = process.env.SMTP_HOST || '';
-  const smtpUser = process.env.SMTP_USER || '';
+  const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const smtpUser = process.env.SMTP_USER || 'nexxskill39@gmail.com';
   const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
   const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
-  const fromEmail = process.env.SMTP_FROM_EMAIL || 'nexxskill39@gmail.com';
+  const fromEmail = process.env.SMTP_FROM_EMAIL || smtpUser;
   const fromName = process.env.SMTP_FROM_NAME || 'NexxSkill Technical Academy';
 
-  if (!smtpHost || !smtpPass) {
-    console.log(`[MailService Mock Send] To: ${toEmail} (${toName}) | Subject: ${subject}`);
-    return true;
+  if (!smtpPass) {
+    console.error(`[MailService Error] SMTP_PASS is missing! Cannot send real email to ${toEmail}. Please configure a 16-character Google App Password in SMTP_PASS.`);
+    return false;
   }
 
   try {
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass
-      },
-      tls: {
-        rejectUnauthorized: false
-      }
-    });
+    const isGmail = smtpHost.includes('gmail') || smtpUser.includes('gmail.com');
+    const transportConfig = isGmail
+      ? {
+          service: 'gmail',
+          auth: {
+            user: smtpUser,
+            pass: smtpPass
+          }
+        }
+      : {
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: {
+            user: smtpUser,
+            pass: smtpPass
+          },
+          tls: {
+            rejectUnauthorized: false
+          }
+        };
 
-    await transporter.sendMail({
+    const transporter = nodemailer.createTransport(transportConfig);
+
+    const info = await transporter.sendMail({
       from: `"${fromName}" <${fromEmail}>`,
       to: `"${toName || 'Learner'}" <${toEmail}>`,
       subject,
       html: htmlBody
     });
 
-    console.log(`[MailService] Email sent successfully to ${toEmail} [${subject}]`);
+    console.log(`[MailService] Email successfully sent to ${toEmail} [MessageId: ${info.messageId}]`);
     return true;
   } catch (error) {
     console.error(`[MailService Error] Failed to send email to ${toEmail}:`, error.message);

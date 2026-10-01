@@ -66,17 +66,35 @@ export async function sendRegisterOtp(req, res, next) {
 
     // Send verification email
     console.log(`[Auth] Generated OTP for ${trimmedEmail}: ${otpCode}`);
-    sendOtpEmail(trimmedEmail, trimmedName, otpCode).catch((err) => {
-      console.error('[Auth Error] Failed to send OTP email:', err.message);
-    });
+    const emailSent = await sendOtpEmail(trimmedEmail, trimmedName, otpCode);
+
+    if (!emailSent) {
+      if (!process.env.SMTP_PASS) {
+        console.warn(`[Auth Warning] SMTP_PASS is not set. Real email cannot be sent.`);
+        return res.status(200).json({
+          success: true,
+          message: `Verification code generated. (Note: Real email delivery requires SMTP_PASS Google App Password on server)`,
+          data: {
+            email: trimmedEmail,
+            devOtp: otpCode
+          }
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'EMAIL_SEND_FAILED',
+          message: 'Unable to deliver verification code to your email. Please verify your email address or try again shortly.'
+        }
+      });
+    }
 
     return res.status(200).json({
       success: true,
       message: `A 6-digit verification code has been sent to ${trimmedEmail}`,
       data: {
-        email: trimmedEmail,
-        // Include devOtp only in local development when SMTP is not configured
-        ...(!process.env.SMTP_PASS && process.env.NODE_ENV !== 'production' ? { devOtp: otpCode } : {})
+        email: trimmedEmail
       }
     });
   } catch (error) {
