@@ -26,7 +26,8 @@ async function sendWithNodemailer(mailOptions) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${relaySecret}`
+          'Authorization': `Bearer ${relaySecret}`,
+          'User-Agent': 'NexxSkill-Relay-Client/1.0'
         },
         body: JSON.stringify({
           to: toEmail || mailOptions.to,
@@ -38,7 +39,7 @@ async function sendWithNodemailer(mailOptions) {
           smtpUser,
           smtpPass
         }),
-        signal: AbortSignal.timeout(10000)
+        signal: AbortSignal.timeout(15000)
       });
 
       const relayData = await relayRes.json();
