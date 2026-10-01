@@ -2,8 +2,28 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { query } from '../config/db.js';
 import { generateTokens } from '../services/jwtService.js';
-import { sendOtpEmail, sendWelcomeEmail } from '../services/mailService.js';
+import { sendOtpEmail, sendOtpEmailDetailed, sendWelcomeEmail, sendMailDetailed } from '../services/mailService.js';
 import { verifyFirebaseIdToken } from '../config/firebaseAdmin.js';
+
+export async function testMail(req, res) {
+  const targetEmail = req.query.to || req.query.email || 'nexxskill39@gmail.com';
+  const result = await sendMailDetailed(
+    targetEmail,
+    'NexxSkill Test',
+    'NexxSkill SMTP Diagnostic Test',
+    '<div style="font-family:sans-serif;padding:20px;"><h2>SMTP Test Successful! 🎉</h2><p>Your NexxSkill backend email dispatch is functioning properly.</p></div>'
+  );
+
+  return res.status(result.success ? 200 : 500).json({
+    success: result.success,
+    targetEmail,
+    smtpUser: process.env.SMTP_USER || 'nexxskill39@gmail.com',
+    smtpHost: process.env.SMTP_HOST || 'smtp.gmail.com',
+    hasSmtpPass: Boolean((process.env.SMTP_PASS || '').trim()),
+    smtpPassLength: (process.env.SMTP_PASS || '').replace(/\s+/g, '').length,
+    result
+  });
+}
 
 export async function sendRegisterOtp(req, res, next) {
   try {
@@ -66,9 +86,9 @@ export async function sendRegisterOtp(req, res, next) {
 
     // Send verification email
     console.log(`[Auth] Generated OTP for ${trimmedEmail}: ${otpCode}`);
-    const emailSent = await sendOtpEmail(trimmedEmail, trimmedName, otpCode);
+    const emailResult = await sendOtpEmailDetailed(trimmedEmail, trimmedName, otpCode);
 
-    if (!emailSent) {
+    if (!emailResult.success) {
       if (!process.env.SMTP_PASS) {
         console.warn(`[Auth Warning] SMTP_PASS is not set. Real email cannot be sent.`);
         return res.status(200).json({
@@ -81,11 +101,13 @@ export async function sendRegisterOtp(req, res, next) {
         });
       }
 
+      console.error(`[Auth Error] Failed to deliver OTP email: ${emailResult.error}`);
       return res.status(500).json({
         success: false,
         error: {
           code: 'EMAIL_SEND_FAILED',
-          message: 'Unable to deliver verification code to your email. Please verify your email address or try again shortly.'
+          message: `Unable to deliver verification code: ${emailResult.error || 'SMTP delivery failed'}. Please check your email or try again shortly.`,
+          details: emailResult.error
         }
       });
     }

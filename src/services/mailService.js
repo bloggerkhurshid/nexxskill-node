@@ -1,62 +1,115 @@
 import nodemailer from 'nodemailer';
+import dns from 'node:dns';
 
-export async function sendMail(toEmail, toName, subject, htmlBody) {
+// Fix Node 17+ IPv6 DNS lookup delays and connection drops in cloud containers
+if (dns.setDefaultResultOrder) {
+  dns.setDefaultResultOrder('ipv4first');
+}
+
+/**
+ * Low-level transporter sender with auto-port fallback (465 SSL -> 587 TLS)
+ */
+async function sendWithNodemailer(mailOptions) {
   const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
   const smtpUser = process.env.SMTP_USER || 'nexxskill39@gmail.com';
   const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
-  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
   const fromEmail = process.env.SMTP_FROM_EMAIL || smtpUser;
   const fromName = process.env.SMTP_FROM_NAME || 'NexxSkill Technical Academy';
 
   if (!smtpPass) {
-    console.error(`[MailService Error] SMTP_PASS is missing! Cannot send real email to ${toEmail}. Please configure a 16-character Google App Password in SMTP_PASS.`);
-    return false;
+    const errorMsg = 'SMTP_PASS is not configured in server environment';
+    console.error(`[MailService Error] ${errorMsg}`);
+    return { success: false, error: errorMsg };
   }
 
-  try {
-    const isGmail = smtpHost.includes('gmail') || smtpUser.includes('gmail.com');
-    const transportConfig = isGmail
-      ? {
-          service: 'gmail',
-          auth: {
-            user: smtpUser,
-            pass: smtpPass
-          }
+  const isGmail = smtpHost.includes('gmail') || smtpUser.includes('gmail.com');
+  const attempts = isGmail
+    ? [
+        {
+          name: 'Gmail Port 465 (SSL)',
+          host: 'smtp.gmail.com',
+          port: 465,
+          secure: true,
+          family: 4,
+          auth: { user: smtpUser, pass: smtpPass },
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 8000,
+          greetingTimeout: 8000,
+          socketTimeout: 10000
+        },
+        {
+          name: 'Gmail Port 587 (STARTTLS)',
+          host: 'smtp.gmail.com',
+          port: 587,
+          secure: false,
+          requireTLS: true,
+          family: 4,
+          auth: { user: smtpUser, pass: smtpPass },
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 8000,
+          greetingTimeout: 8000,
+          socketTimeout: 10000
         }
-      : {
+      ]
+    : [
+        {
+          name: `Custom SMTP ${smtpHost}:${process.env.SMTP_PORT || 587}`,
           host: smtpHost,
-          port: smtpPort,
-          secure: smtpPort === 465,
-          auth: {
-            user: smtpUser,
-            pass: smtpPass
-          },
-          tls: {
-            rejectUnauthorized: false
-          }
-        };
+          port: parseInt(process.env.SMTP_PORT || '587', 10),
+          secure: parseInt(process.env.SMTP_PORT || '587', 10) === 465,
+          family: 4,
+          auth: { user: smtpUser, pass: smtpPass },
+          tls: { rejectUnauthorized: false },
+          connectionTimeout: 8000,
+          greetingTimeout: 8000,
+          socketTimeout: 10000
+        }
+      ];
 
-    const transporter = nodemailer.createTransport(transportConfig);
+  let lastError = null;
 
-    const info = await transporter.sendMail({
-      from: `"${fromName}" <${fromEmail}>`,
-      to: `"${toName || 'Learner'}" <${toEmail}>`,
-      subject,
-      html: htmlBody
-    });
+  for (const transportConfig of attempts) {
+    try {
+      const transporter = nodemailer.createTransport(transportConfig);
+      const info = await transporter.sendMail({
+        from: `"${fromName}" <${fromEmail}>`,
+        ...mailOptions
+      });
 
-    console.log(`[MailService] Email successfully sent to ${toEmail} [MessageId: ${info.messageId}]`);
-    return true;
-  } catch (error) {
-    console.error(`[MailService Error] Failed to send email to ${toEmail}:`, error.message);
-    return false;
+      console.log(`[MailService] Email sent via ${transportConfig.name} to ${mailOptions.to} [ID: ${info.messageId}]`);
+      return { success: true, messageId: info.messageId, method: transportConfig.name };
+    } catch (err) {
+      lastError = err;
+      console.warn(`[MailService Warning] Attempt via ${transportConfig.name} failed: ${err.message}`);
+      // If authentication failed (535), no need to retry with another port — credentials are wrong
+      if (err.message && (err.message.includes('535') || err.message.includes('BadCredentials') || err.message.includes('Username and Password not accepted'))) {
+        break;
+      }
+    }
   }
+
+  const finalMessage = lastError ? lastError.message : 'Unknown mail transport failure';
+  console.error(`[MailService Error] All SMTP delivery attempts failed: ${finalMessage}`);
+  return { success: false, error: finalMessage };
+}
+
+export async function sendMailDetailed(toEmail, toName, subject, htmlBody) {
+  return sendWithNodemailer({
+    to: `"${toName || 'Learner'}" <${toEmail}>`,
+    subject,
+    html: htmlBody
+  });
+}
+
+export async function sendMail(toEmail, toName, subject, htmlBody) {
+  const res = await sendMailDetailed(toEmail, toName, subject, htmlBody);
+  return res.success;
 }
 
 /**
  * Send 6-digit OTP verification email for account registration
  */
-export async function sendOtpEmail(toEmail, toName, otpCode) {
+export async function sendOtpEmailDetailed(toEmail, toName, otpCode) {
   const subject = `${otpCode} is your NexxSkill verification code`;
   const htmlBody = `
     <!DOCTYPE html>
@@ -132,7 +185,12 @@ export async function sendOtpEmail(toEmail, toName, otpCode) {
     </html>
   `;
 
-  return sendMail(toEmail, toName, subject, htmlBody);
+  return sendMailDetailed(toEmail, toName, subject, htmlBody);
+}
+
+export async function sendOtpEmail(toEmail, toName, otpCode) {
+  const res = await sendOtpEmailDetailed(toEmail, toName, otpCode);
+  return res.success;
 }
 
 /**
