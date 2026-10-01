@@ -249,7 +249,7 @@ export async function initDatabase() {
         ['What background knowledge is required for the Mainframe Full Course?', 'No prior Mainframe experience is necessary. Basic programming fundamentals are helpful, but we start from core principles.', 'General', 1],
         ['Are live interactive classes provided or pre-recorded sessions?', 'We offer live interactive classes led by industry veterans from IBM and Societe Generale, along with recorded session access for revisions.', 'Classes', 2],
         ['How does the placement support and interview prep work?', 'Our Interview Preparation module includes resume refinement, mock technical interviews, and direct referral opportunities with partner enterprises.', 'Career Support', 3],
-        ['What payment options are available?', 'We accept Credit/Debit cards, Net Banking, UPI, and major digital wallets securely through Razorpay.', 'Payments', 4]
+        ['What payment options are available?', 'We accept Credit/Debit cards, Net Banking, UPI, and major digital wallets securely through Cashfree Payments.', 'Payments', 4]
       ];
 
       for (const f of defaultFaqs) {
