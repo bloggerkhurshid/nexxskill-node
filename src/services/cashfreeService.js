@@ -16,7 +16,7 @@ export function getCashfreeConfig() {
     secretKey &&
     !appId.includes('placeholder') &&
     !secretKey.includes('placeholder') &&
-    !appId.includes('demo')
+    !appId.includes('your_cashfree')
   );
 
   return {
@@ -31,29 +31,13 @@ export function getCashfreeConfig() {
 
 /**
  * Create a Cashfree Payment Order
- * @param {Object} params
- * @param {string} params.orderId - Unique merchant order ID
- * @param {number} params.amountRupees - Amount in INR (Rupees)
- * @param {Object} params.customer - { id, name, email, phone }
- * @param {string} params.returnUrl - URL to redirect or notify on completion
- * @param {string} params.orderNote - Description or note
  */
 export async function createOrder({ orderId, amountRupees, customer, returnUrl, orderNote }) {
   const config = getCashfreeConfig();
   const finalOrderId = orderId || ('order_' + Date.now() + '_' + crypto.randomBytes(3).toString('hex'));
 
-  // If Cashfree API credentials are not yet configured, return a graceful demo session
   if (!config.isConfigured) {
-    return {
-      orderId: finalOrderId.startsWith('order_demo_') ? finalOrderId : `order_demo_${finalOrderId}`,
-      cfOrderId: 'cf_demo_' + crypto.randomBytes(6).toString('hex'),
-      paymentSessionId: 'session_demo_' + crypto.randomBytes(12).toString('hex'),
-      orderAmount: parseFloat(Number(amountRupees).toFixed(2)),
-      orderCurrency: 'INR',
-      environment: config.environment,
-      appId: 'cf_demo_app_id',
-      isDemo: true
-    };
+    throw new Error('Cashfree gateway is not configured on the server. Please add CASHFREE_APP_ID and CASHFREE_SECRET_KEY in server environment variables.');
   }
 
   const cleanPhone = (customer.phone || '')
@@ -76,66 +60,43 @@ export async function createOrder({ orderId, amountRupees, customer, returnUrl, 
     order_note: orderNote || 'NexxSkill Academy Course Enrollment'
   };
 
-  try {
-    const response = await fetch(`${config.baseUrl}/orders`, {
-      method: 'POST',
-      headers: {
-        'x-client-id': config.appId,
-        'x-client-secret': config.secretKey,
-        'x-api-version': config.apiVersion,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
+  const response = await fetch(`${config.baseUrl}/orders`, {
+    method: 'POST',
+    headers: {
+      'x-client-id': config.appId,
+      'x-client-secret': config.secretKey,
+      'x-api-version': config.apiVersion,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
 
-    const data = await response.json();
+  const data = await response.json();
 
-    if (!response.ok) {
-      const errMsg = data.message || data.error || 'Failed to create Cashfree order';
-      throw new Error(errMsg);
-    }
-
-    return {
-      orderId: data.order_id,
-      cfOrderId: data.cf_order_id,
-      paymentSessionId: data.payment_session_id,
-      orderAmount: data.order_amount,
-      orderCurrency: data.order_currency,
-      environment: config.environment,
-      appId: config.appId,
-      isDemo: false
-    };
-  } catch (err) {
-    console.error('[Cashfree] Order creation error:', err.message);
-    // Graceful fallback to demo mode so testing never breaks
-    return {
-      orderId: `order_demo_${finalOrderId}`,
-      cfOrderId: 'cf_demo_' + crypto.randomBytes(6).toString('hex'),
-      paymentSessionId: 'session_demo_' + crypto.randomBytes(12).toString('hex'),
-      orderAmount: parseFloat(Number(amountRupees).toFixed(2)),
-      orderCurrency: 'INR',
-      environment: config.environment,
-      appId: config.appId || 'cf_demo_app_id',
-      isDemo: true,
-      errorNotice: err.message
-    };
+  if (!response.ok) {
+    const errMsg = data.message || data.error || 'Failed to create Cashfree order';
+    throw new Error(errMsg);
   }
+
+  return {
+    orderId: data.order_id,
+    cfOrderId: data.cf_order_id,
+    paymentSessionId: data.payment_session_id,
+    orderAmount: data.order_amount,
+    orderCurrency: data.order_currency,
+    environment: config.environment,
+    appId: config.appId
+  };
 }
 
 /**
- * Retrieve Order Details from Cashfree
+ * Retrieve Order Details from Cashfree (Strict verification)
  */
 export async function getOrder(orderId) {
   const config = getCashfreeConfig();
 
-  if (!config.isConfigured || String(orderId).includes('demo')) {
-    return {
-      order_id: orderId,
-      order_status: 'PAID',
-      cf_order_id: 'cf_demo_' + crypto.randomBytes(6).toString('hex'),
-      order_amount: 100,
-      is_demo: true
-    };
+  if (!config.isConfigured) {
+    throw new Error('Cashfree gateway is not configured on the server. Please set CASHFREE_APP_ID and CASHFREE_SECRET_KEY.');
   }
 
   const response = await fetch(`${config.baseUrl}/orders/${encodeURIComponent(orderId)}`, {
@@ -162,14 +123,8 @@ export async function getOrder(orderId) {
 export async function getOrderPayments(orderId) {
   const config = getCashfreeConfig();
 
-  if (!config.isConfigured || String(orderId).includes('demo')) {
-    return [
-      {
-        cf_payment_id: 'cf_pay_demo_' + crypto.randomBytes(6).toString('hex'),
-        payment_status: 'SUCCESS',
-        payment_amount: 100
-      }
-    ];
+  if (!config.isConfigured) {
+    return [];
   }
 
   try {
@@ -200,7 +155,7 @@ export async function getOrderPayments(orderId) {
 export function verifyWebhookSignature(rawBody, signature, timestamp) {
   const config = getCashfreeConfig();
   if (!config.isConfigured || !config.secretKey) {
-    return true; // Demo mode auto-verify
+    return false;
   }
 
   if (!signature || !timestamp) {

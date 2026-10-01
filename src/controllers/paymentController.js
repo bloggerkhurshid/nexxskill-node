@@ -144,41 +144,29 @@ export async function verifyPayment(req, res, next) {
     const orderId = (input.order_id || input.orderId || input.razorpay_order_id || '').trim();
     let paymentId = (input.cf_payment_id || input.payment_id || input.razorpay_payment_id || '').trim();
 
-    if (!orderId && !paymentId) {
+    if (!orderId) {
       return res.status(400).json({
         success: false,
-        error: { code: 'INVALID_INPUT', message: 'Missing order reference' }
+        error: { code: 'INVALID_INPUT', message: 'Order reference ID is required for verification' }
       });
     }
 
-    let isVerified = false;
+    // Query Cashfree PG API directly
+    const orderInfo = await CashfreeService.getOrder(orderId);
 
-    if (orderId) {
-      try {
-        const orderInfo = await CashfreeService.getOrder(orderId);
-        if (orderInfo && (orderInfo.order_status === 'PAID' || orderInfo.is_demo)) {
-          isVerified = true;
-          if (!paymentId) {
-            const payments = await CashfreeService.getOrderPayments(orderId);
-            paymentId = payments?.[0]?.cf_payment_id || `cf_pay_${Date.now()}`;
-          }
-        }
-      } catch (err) {
-        // Fallback for demo order test
-        if (orderId.includes('demo')) {
-          isVerified = true;
-          paymentId = paymentId || `cf_pay_demo_${Date.now()}`;
-        }
-      }
-    } else if (paymentId) {
-      isVerified = true;
-    }
-
-    if (!isVerified) {
+    if (!orderInfo || orderInfo.order_status !== 'PAID') {
       return res.status(400).json({
         success: false,
-        error: { code: 'PAYMENT_NOT_COMPLETED', message: 'Payment has not been completed or verified yet.' }
+        error: {
+          code: 'PAYMENT_NOT_COMPLETED',
+          message: `Payment is not completed (Current Cashfree status: ${orderInfo?.order_status || 'UNPAID'}). Please complete payment to unlock your course.`
+        }
       });
+    }
+
+    if (!paymentId) {
+      const payments = await CashfreeService.getOrderPayments(orderId);
+      paymentId = payments?.[0]?.cf_payment_id || `cf_pay_${Date.now()}`;
     }
 
     if (orderId) {

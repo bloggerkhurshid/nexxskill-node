@@ -24,22 +24,15 @@ test('JWT Service: should generate and decode valid tokens', () => {
   assert.strictEqual(decoded.type, 'access');
 });
 
-test('Cashfree Service: should generate demo order when unconfigured', async () => {
-  const order = await CashfreeService.createOrder({
-    orderId: 'order_test_123',
-    amountRupees: 4999,
-    customer: { id: 1, name: 'Student', email: 'student@example.com' }
-  });
-  assert.ok(order.orderId, 'Order ID should exist');
-  assert.ok(order.paymentSessionId, 'Payment session ID should exist');
-  assert.strictEqual(order.orderAmount, 4999);
-  assert.strictEqual(order.orderCurrency, 'INR');
-});
-
-test('Cashfree Service: should verify mock order and webhook safely', async () => {
-  const order = await CashfreeService.getOrder('order_demo_123');
-  assert.strictEqual(order.order_status, 'PAID');
-
-  const verified = CashfreeService.verifyWebhookSignature('{}', 'any_sig', '1700000000');
-  assert.strictEqual(verified, true);
+test('Cashfree Service: throws error when unconfigured so no free bypass is allowed', async () => {
+  try {
+    await CashfreeService.createOrder({
+      orderId: 'order_test_123',
+      amountRupees: 4999,
+      customer: { id: 1, name: 'Student', email: 'student@example.com' }
+    });
+    assert.fail('Should have thrown unconfigured error');
+  } catch (err) {
+    assert.ok(err.message.includes('Cashfree'), 'Should report Cashfree not configured');
+  }
 });
